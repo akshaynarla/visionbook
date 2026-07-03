@@ -15,7 +15,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-python: '3.10'
+          python-version: '3.10'
 
       - name: Install Python Dependencies
         run: |
@@ -24,13 +24,17 @@ jobs:
       - name: Set up Quarto
         uses: quarto-dev/quarto-actions/setup@v2
 
-      - name: Render Book to PDF via Typst
-        run: quarto render --to typst
+      - name: Install TinyTeX for PDF rendering
+        run: |
+          quarto install tool tinytex
+
+      - name: Render Book to PDF
+        run: quarto render --to pdf
 
       - name: Upload PDF Artifact
         uses: actions/upload-artifact@v4
         with:
           name: visionbook-pdf
           path: |
+            _book/*.pdf
             *.pdf
-            **/*.pdf
