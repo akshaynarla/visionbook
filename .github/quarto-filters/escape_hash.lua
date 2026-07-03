@@ -5,17 +5,22 @@
 
 function Str(el)
   if FORMAT:match("latex") then
-    el.text = el.text:gsub("#", "\\#")
+    -- Only escape # if not inside math mode or other special contexts
+    -- Simple check: don't escape if surrounded by math delimiters
+    if not el.text:match("^%$.*%$$") then
+      el.text = el.text:gsub("#", "\\#")
+    end
   end
   return el
 end
 
 function RawInline(el)
   if FORMAT:match("latex") then
-    -- Only modify HTML/raw content that will be passed through
+    -- Skip escaping for LaTeX and math formats
     if el.format == "html" or el.format == "" then
       el.text = el.text:gsub("#", "\\#")
     end
+    -- Never escape content in latex or math format
   end
   return el
 end
@@ -25,6 +30,7 @@ function RawBlock(el)
     if el.format == "html" or el.format == "" then
       el.text = el.text:gsub("#", "\\#")
     end
+    -- Never escape content in latex or math format
   end
   return el
 end
