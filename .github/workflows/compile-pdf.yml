@@ -29,7 +29,7 @@ jobs:
           quarto install tool tinytex
 
       - name: Render Book to PDF
-        run: quarto render --to pdf
+        run: quarto render --to pdf --lua-filter .github/quarto-filters/escape_hash.lua
 
       - name: Upload PDF Artifact
         uses: actions/upload-artifact@v4
