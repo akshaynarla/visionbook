@@ -267,10 +267,25 @@ jobs:
 
           python /tmp/build_pdf.py
 
+      - name: Compress PDF
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ghostscript
+
+          gs \
+            -sDEVICE=pdfwrite \
+            -dCompatibilityLevel=1.6 \
+            -dPDFSETTINGS=/ebook \
+            -dNOPAUSE \
+            -dQUIET \
+            -dBATCH \
+            -sOutputFile=_book/visionbook-compressed.pdf \
+            _book/visionbook.pdf
+      
       - name: Upload PDF artifact
         uses: actions/upload-artifact@v4
         with:
           name: visionbook-pdf
-          path: _book/visionbook.pdf
+          path: _book/visionbook-compressed.pdf
           if-no-files-found: error
           retention-days: 30
