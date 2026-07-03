@@ -1,48 +1,97 @@
 name: Compile Book to PDF
+
 on:
   push:
     branches:
       - main
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   build-pdf:
     runs-on: ubuntu-latest
+
     steps:
-      - name: Checkout Repository
+      - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
+          python-version: "3.10"
 
-      - name: Install Python Dependencies
+      - name: Install Python dependencies
         run: |
-          pip install numpy matplotlib jupyter
+          python -m pip install --upgrade pip
+          python -m pip install numpy matplotlib jupyter
 
-      - name: Set up Quarto
+      - name: Set up Quarto and TinyTeX
         uses: quarto-dev/quarto-actions/setup@v2
+        env:
+          GH_TOKEN: ${{ github.token }}
+        with:
+          tinytex: true
 
-      - name: Install TinyTeX for PDF rendering
+      - name: Prepare PDF configuration
         run: |
-          quarto install tool tinytex
+          cat > _quarto-pdf.yml <<'EOF'
+          format:
+            pdf:
+              pdf-engine: lualatex
+              toc: true
+              toc-depth: 2
+              keep-tex: true
+              latex-auto-install: true
+              code-overflow: wrap
+              fig-cap-location: bottom
+              tbl-cap-location: top
 
-      - name: Install additional LaTeX packages
-        run: |
-          tlmgr update --self
-          tlmgr install algorithm2e xpatch blindtext natbib minted
+          filters:
+            - pseudocode
+          EOF
 
-      - name: Render Book to PDF
-        run: |
-          quarto render --to pdf \
-            --lua-filter .github/quarto-filters/escape_hash.lua \
-            --lua-filter .github/quarto-filters/fix_math.lua
+          python <<'PY'
+          from pathlib import Path
 
-      - name: Upload PDF Artifact
+          path = Path("index.qmd")
+          if path.exists():
+              text = path.read_text(encoding="utf-8")
+              text = text.replace(
+                  "include-before-body: pre-title.html\n", ""
+              )
+              text = text.replace(
+                  "title-block-style: none\n", ""
+              )
+              path.write_text(text, encoding="utf-8")
+          PY
+
+      - name: Check Quarto installation
+        run: quarto check
+
+      - name: Render book to PDF
+        env:
+          QUARTO_PROFILE: pdf
+          QUARTO_PRINT_STACK: "true"
+        run: quarto render --to pdf
+
+      - name: Upload PDF
         uses: actions/upload-artifact@v4
         with:
           name: visionbook-pdf
+          path: _book/*.pdf
+          if-no-files-found: error
+
+      - name: Upload build logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: visionbook-pdf-debug
           path: |
-            _book/*.pdf
-            *.pdf
+            _book/**/*.tex
+            _book/**/*.log
+            **/*.log
+          if-no-files-found: ignore
