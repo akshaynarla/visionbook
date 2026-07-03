@@ -1,4 +1,4 @@
-name: Compile Visionbook to PDF
+name: Build Visionbook for Offline Reading
 
 on:
   push:
@@ -10,9 +10,8 @@ permissions:
   contents: read
 
 jobs:
-  build-pdf:
+  build-html:
     runs-on: ubuntu-latest
-    timeout-minutes: 90
 
     steps:
       - name: Checkout repository
@@ -26,15 +25,7 @@ jobs:
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install \
-            jupyter \
-            matplotlib \
-            numpy \
-            playwright \
-            pyyaml \
-            pypdf
-
-          python -m playwright install --with-deps chromium
+          python -m pip install numpy matplotlib jupyter
 
       - name: Set up Quarto
         uses: quarto-dev/quarto-actions/setup@v2
@@ -45,247 +36,28 @@ jobs:
         run: |
           quarto render --to html
 
-      - name: Print HTML book to one PDF
+      - name: Add offline instructions
         run: |
-          cat > /tmp/build_pdf.py <<'PY'
-          import socket
-          import subprocess
-          import sys
-          import time
-          from pathlib import Path
+          cat > _book/README_LOCAL.txt <<'EOF'
+          Visionbook Offline Copy
 
-          import yaml
-          from playwright.sync_api import sync_playwright
-          from pypdf import PdfWriter
+          1. Extract the downloaded artifact.
+          2. Open a terminal inside the extracted _book folder.
+          3. Run:
 
+             python -m http.server 8000
 
-          ROOT = Path.cwd()
-          BOOK_DIR = ROOT / "_book"
-          PARTS_DIR = ROOT / "_pdf_parts"
-          OUTPUT_PDF = BOOK_DIR / "visionbook.pdf"
-          PORT = 8765
+          4. Open this address in your browser:
 
+             http://localhost:8000
 
-          def collect_chapters(items):
-              for item in items or []:
-                  if isinstance(item, str):
-                      yield item
-                  elif isinstance(item, dict):
-                      part = item.get("part")
-                      if isinstance(part, str):
-                          yield part
+          Stop the server with Ctrl+C.
+          EOF
 
-                      yield from collect_chapters(item.get("chapters", []))
-
-
-          config = yaml.safe_load(
-              (ROOT / "_quarto.yml").read_text(encoding="utf-8")
-          )
-
-          sources = list(collect_chapters(config["book"]["chapters"]))
-
-          # Remove duplicates while preserving book order.
-          sources = list(dict.fromkeys(sources))
-
-          if not BOOK_DIR.exists():
-              raise RuntimeError("_book was not created by Quarto")
-
-          PARTS_DIR.mkdir(exist_ok=True)
-
-          server = subprocess.Popen(
-              [
-                  sys.executable,
-                  "-m",
-                  "http.server",
-                  str(PORT),
-                  "--bind",
-                  "127.0.0.1",
-                  "--directory",
-                  str(BOOK_DIR),
-              ],
-              stdout=subprocess.DEVNULL,
-              stderr=subprocess.DEVNULL,
-          )
-
-          for _ in range(50):
-              try:
-                  with socket.create_connection(
-                      ("127.0.0.1", PORT), timeout=1
-                  ):
-                      break
-              except OSError:
-                  time.sleep(0.2)
-          else:
-              server.terminate()
-              raise RuntimeError("Local HTML server did not start")
-
-          print_css = """
-          @page {
-            size: A4;
-            margin: 15mm 13mm 17mm 13mm;
-          }
-
-          #quarto-header,
-          #quarto-sidebar,
-          #quarto-margin-sidebar,
-          .quarto-secondary-nav,
-          .page-navigation,
-          .nav-footer,
-          .sidebar-navigation,
-          .quarto-other-links {
-            display: none !important;
-          }
-
-          html,
-          body {
-            background: white !important;
-          }
-
-          #quarto-content,
-          .page-columns,
-          main.content {
-            display: block !important;
-            grid-column: auto !important;
-            max-width: none !important;
-            width: auto !important;
-            margin: 0 !important;
-            padding: 0 !important;
-          }
-
-          .column-margin,
-          .aside,
-          aside {
-            display: block !important;
-            float: none !important;
-            width: auto !important;
-            max-width: none !important;
-            margin: 1em 0 !important;
-            padding: 0.7em !important;
-            border-left: 2px solid #999 !important;
-            font-size: 0.9em !important;
-            break-inside: avoid;
-          }
-
-          figure,
-          img,
-          svg,
-          table,
-          pre,
-          .cell {
-            break-inside: avoid;
-          }
-
-          a {
-            color: inherit !important;
-            text-decoration: none !important;
-          }
-          """
-
-          generated = []
-
-          try:
-              with sync_playwright() as playwright:
-                  browser = playwright.chromium.launch(headless=True)
-                  page = browser.new_page(
-                      viewport={"width": 1440, "height": 1000}
-                  )
-
-                  for number, source in enumerate(sources, start=1):
-                      html_name = Path(source).with_suffix(".html").as_posix()
-                      html_file = BOOK_DIR / html_name
-
-                      if not html_file.exists():
-                          raise FileNotFoundError(
-                              f"Rendered chapter missing: {html_file}"
-                          )
-
-                      url = f"http://127.0.0.1:{PORT}/{html_name}"
-                      print(f"[{number}/{len(sources)}] Printing {html_name}")
-
-                      page.goto(
-                          url,
-                          wait_until="domcontentloaded",
-                          timeout=120_000,
-                      )
-
-                      try:
-                          page.wait_for_load_state(
-                              "networkidle",
-                              timeout=30_000,
-                          )
-                      except Exception:
-                          pass
-
-                      try:
-                          page.wait_for_function(
-                              """
-                              Array.from(document.images)
-                                .every(image => image.complete)
-                              """,
-                              timeout=60_000,
-                          )
-                      except Exception:
-                          pass
-
-                      page.add_style_tag(content=print_css)
-                      page.wait_for_timeout(1000)
-
-                      title = page.locator("main h1").first.text_content()
-                      title = title.strip() if title else Path(source).stem
-
-                      part_pdf = PARTS_DIR / f"{number:04d}.pdf"
-
-                      page.pdf(
-                          path=str(part_pdf),
-                          format="A4",
-                          print_background=True,
-                          display_header_footer=False,
-                          prefer_css_page_size=True,
-                      )
-
-                      generated.append((part_pdf, title))
-
-                  browser.close()
-
-              writer = PdfWriter()
-
-              for part_pdf, title in generated:
-                  writer.append(
-                      str(part_pdf),
-                      outline_item=title,
-                  )
-
-              with OUTPUT_PDF.open("wb") as output:
-                  writer.write(output)
-
-              print(f"Created {OUTPUT_PDF}")
-
-          finally:
-              server.terminate()
-              server.wait(timeout=10)
-          PY
-
-          python /tmp/build_pdf.py
-
-      - name: Compress PDF
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y ghostscript
-
-          gs \
-            -sDEVICE=pdfwrite \
-            -dCompatibilityLevel=1.6 \
-            -dPDFSETTINGS=/ebook \
-            -dNOPAUSE \
-            -dQUIET \
-            -dBATCH \
-            -sOutputFile=_book/visionbook-compressed.pdf \
-            _book/visionbook.pdf
-      
-      - name: Upload PDF artifact
+      - name: Upload offline HTML book
         uses: actions/upload-artifact@v4
         with:
-          name: visionbook-pdf
-          path: _book/visionbook-compressed.pdf
+          name: visionbook-offline-html
+          path: _book/
           if-no-files-found: error
           retention-days: 30
