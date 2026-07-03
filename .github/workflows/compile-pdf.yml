@@ -28,8 +28,16 @@ jobs:
         run: |
           quarto install tool tinytex
 
+      - name: Install additional LaTeX packages
+        run: |
+          tlmgr update --self
+          tlmgr install algorithm2e xpatch blindtext natbib minted
+
       - name: Render Book to PDF
-        run: quarto render --to pdf --lua-filter .github/quarto-filters/escape_hash.lua
+        run: |
+          quarto render --to pdf \
+            --lua-filter .github/quarto-filters/escape_hash.lua \
+            --lua-filter .github/quarto-filters/fix_math.lua
 
       - name: Upload PDF Artifact
         uses: actions/upload-artifact@v4
